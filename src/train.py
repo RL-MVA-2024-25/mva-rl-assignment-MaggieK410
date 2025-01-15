@@ -153,12 +153,12 @@ class DuelingQNetwork(nn.Module):
 
        self.apply(self._init_weights)
 
-   def _init_weights(self, m):
+    def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
             nn.init.constant_(m.bias, 0)
 
-   def forward(self, x):
+    def forward(self, x):
        features = self.feature(x)
        value = self.value_stream(features)              
        advantage = self.advantage_stream(features)      
