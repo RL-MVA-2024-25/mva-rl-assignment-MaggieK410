@@ -204,9 +204,9 @@ class ProjectAgent:
         """
         if use_random and random.random() < self.epsilon:
            return np.random.randint(0, self.n_actions)
-       state_t = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
-       q_values = self.q_network(state_t)
-       return q_values.argmax(dim=1).item()
+        state_t = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
+        q_values = self.q_network(state_t)
+        return q_values.argmax(dim=1).item()
 
     def train_step(self):
         """Function to execute a train step. The states, actions, rewards, etc are firstly sampled from the buffer and
