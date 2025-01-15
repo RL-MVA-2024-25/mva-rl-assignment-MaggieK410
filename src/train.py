@@ -202,7 +202,7 @@ class ProjectAgent:
         observation -> observation seen during training
         use_random  -> boolean value whether to use random selection of action or not
         """
-       if use_random and random.random() < self.epsilon:
+        if use_random and random.random() < self.epsilon:
            return np.random.randint(0, self.n_actions)
        state_t = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
        q_values = self.q_network(state_t)
@@ -253,7 +253,7 @@ class ProjectAgent:
         self.scheduler.step()
         
     def update_epsilon(self):
-       if self.epsilon > self.epsilon_min:
+        if self.epsilon > self.epsilon_min:
            self.epsilon *= self.epsilon_decay
 
     def save(self, path):
