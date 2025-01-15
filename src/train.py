@@ -15,6 +15,9 @@ from evaluate import evaluate_HIV, evaluate_HIV_population
 import torch.nn.functional as F
 
 class BinaryIndexedTree:
+    """Class for Binary Indexed tree. This structure is used within the 
+    replay buffer to store information.
+    """
     def __init__(self, capacity):
         self.capacity = capacity
         self.tree = np.zeros(capacity + 1)  # BIT is 1-indexed
@@ -57,6 +60,10 @@ class BinaryIndexedTree:
 
 
 class PrioritizedReplayBuffer:
+    """The Prioritized Replay Buffer is a data structure to store information
+    during the training process. It uses binary indexed trees as an internal
+    structure. 
+    """
     def __init__(self, capacity=100000, alpha=0.6, beta=0.4, beta_increment=1e-4):
         self.tree = BinaryIndexedTree(capacity)
         self.capacity = capacity
@@ -111,6 +118,9 @@ class PrioritizedReplayBuffer:
 
 
 class DuelingQNetwork(nn.Module):
+    """The Dueling Q Network is a neural network that embeds values, 
+    features and advantages. From these, we calculate q values during training.  
+    """
    def __init__(self, state_dim=6, action_dim=4):
        super(DuelingQNetwork, self).__init__()
 
@@ -158,32 +168,40 @@ class DuelingQNetwork(nn.Module):
 
 
 class ProjectAgent:
+    """The ProjectAgent class unites the previous classes together into one
+    functioning structure. In the initialization, we set hyperparameters used during training.
+    """
     def __init__(self, state_dim=6, n_actions=4):
-        self.n_actions = n_actions
-        self.state_dim = state_dim
-        self.gamma = 0.85
-        self.save_path = "project_agent_updatefreq_lr1e4.pt"
+        self.n_actions = n_actions # Number of actions
+        self.state_dim = state_dim # Number of states
+        self.gamma = 0.85 # Gamma value for discounted reward 
+        self.save_path = "project_agent_trained_for_longer.pt" # Save path
         
-        self.epsilon = 1.0
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.976#0.9965 
+        self.epsilon = 1.0 # Epsilon start value
+        self.epsilon_min = 0.01 # Minimum Epsilon value
+        self.epsilon_decay = 0.9965 # Epsilon decrease
         
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Device to train on
         
-        self.q_network = DuelingQNetwork(state_dim, n_actions).to(self.device)
-        self.target_network = DuelingQNetwork(state_dim, n_actions).to(self.device)
-        self.target_network.load_state_dict(self.q_network.state_dict())
+        self.q_network = DuelingQNetwork(state_dim, n_actions).to(self.device) # Q network init
+        self.target_network = DuelingQNetwork(state_dim, n_actions).to(self.device) # Taget network init
+        self.target_network.load_state_dict(self.q_network.state_dict()) 
         
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=1e-4, betas=(0.5, 0.999)) #1e-3
-        self.scheduler = lr_scheduler.StepLR(self.optimizer, step_size=350, gamma=0.5)
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=1e-3, betas=(0.5, 0.999)) # Setting up optimiizer
+        self.scheduler = lr_scheduler.StepLR(self.optimizer, step_size=350, gamma=0.5) # Learning rate scheduler
         
-        self.replay_buffer = PrioritizedReplayBuffer(capacity=600000, alpha=0.6, beta=0.4) #0.6
+        self.replay_buffer = PrioritizedReplayBuffer(capacity=600000, alpha=0.6, beta=0.4) # Replay buffer with binary trees
         
         self.batch_size = 1024
-        self.target_update_freq = 100#1000
+        self.target_update_freq = 1000 # Frequency to update  
         self.update_count = 0
 
     def act(self, observation, use_random=False):
+        """Function to select an action. This can be done either randomly, or based on the trained q network.
+        Parameters:
+        observation -> observation seen during training
+        use_random  -> boolean value whether to use random selection of action or not
+        """
        if use_random and random.random() < self.epsilon:
            return np.random.randint(0, self.n_actions)
        state_t = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
@@ -191,37 +209,42 @@ class ProjectAgent:
        return q_values.argmax(dim=1).item()
 
     def train_step(self):
+        """Function to execute a train step. The states, actions, rewards, etc are firstly sampled from the buffer and
+        converted into tensors. Then, the Q Network is used to calculate the current q values. Next actions, 
+        q values and target q values are then calculated and the difference between the target q values and the current 
+        q values obtained. From this, the loss is calculated which is used to update the q networks.
+        """
         if len(self.replay_buffer) < self.batch_size:
             return
-            
+        # Sample from buffer     
         states, actions, rewards, next_states, dones, indices, weights = self.replay_buffer.sample(self.batch_size)
-        
+        # Convert everything into tensors
         states_t = torch.FloatTensor(states).to(self.device)
         actions_t = torch.LongTensor(actions).to(self.device)
         rewards_t = torch.FloatTensor(rewards).to(self.device)
         next_states_t = torch.FloatTensor(next_states).to(self.device)
         dones_t = torch.FloatTensor(dones).to(self.device)
         weights_t = torch.FloatTensor(weights).to(self.device)
-        
+        # Calculate the current q values
         current_q = self.q_network(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
-        
+        # Obtain next q values and target values 
         with torch.no_grad():
             next_actions = self.q_network(next_states_t).argmax(1)
             next_q = self.target_network(next_states_t).gather(1, next_actions.unsqueeze(1)).squeeze(1)
             target_q = rewards_t + self.gamma * next_q * (1 - dones_t)
-        
+        # Calculate errors between current q values and target q values
         td_errors = torch.abs(current_q - target_q).detach().cpu().numpy()
-        
+        # Update buffer priorities
         self.replay_buffer.update_priorities(indices, td_errors)
-        
+        # Calculate the loss
         loss = (weights_t * F.smooth_l1_loss(current_q, target_q, reduction='none')).mean()
-        
+        # Update model and optimizer, clip gradients
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         self.optimizer.step()
         
-        
+        # If necessary, update target network
         self.update_count += 1
         if self.update_count % self.target_update_freq == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
@@ -245,7 +268,13 @@ class ProjectAgent:
         self.q_network.eval()
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
+
 def train_agent(env_name="HIVPatient-v0", num_episodes=1000, max_steps_per_episode=200, save_freq=50):
+    """Function to navigate training the agent. At first, the environment is loaded and the ProjectAgent 
+    initialized. Then, we iterate over episodes, select actions and update our parameters. After each
+    action selection, we update the buffer with the previously selected action, reward and next state. 
+    Then, the model parameters are updated and we transition into the next state.
+    """
     # Initialize the environment
     env = TimeLimit(HIVPatient(), max_episode_steps=max_steps_per_episode)
     agent = ProjectAgent()
@@ -258,7 +287,7 @@ def train_agent(env_name="HIVPatient-v0", num_episodes=1000, max_steps_per_episo
         total_reward = 0
 
         for step in range(max_steps_per_episode):
-            # Select action
+            # Select action by agent and use random if value smaller than epsilon
             action = agent.act(state, use_random=True)
 
             # Take action in environment
@@ -283,26 +312,24 @@ def train_agent(env_name="HIVPatient-v0", num_episodes=1000, max_steps_per_episo
 
         rewards_per_episode.append(total_reward)
 
-        # Log progress
+        # Log progress on average  of 10 episodes
         if episode % 10 == 0:
             avg_reward = np.mean(rewards_per_episode[-10:])
             elapsed_time = time.time() - start_time
             print(f"Episode {episode}/{num_episodes} | Avg Reward: {avg_reward:.2f} | Epsilon: {agent.epsilon:.4f} | Time: {elapsed_time:.2f}s")
 
-        # Save model periodically
+        # Save model every save_freq steps
         if episode % save_freq == 0:
             agent.save(agent.save_path)
 
-    # Final save
+    # Final save of the model
     agent.save(agent.save_path)
     print("Training completed and model saved.")
 
     return rewards_per_episode
 
-# Start training
 if __name__ == "__main__":
     env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)
-
     rewards = train_agent(env_name="HIVPatient-v0", num_episodes=5000, max_steps_per_episode=200, save_freq=50)
 
 
