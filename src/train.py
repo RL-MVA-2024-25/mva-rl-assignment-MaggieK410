@@ -121,7 +121,7 @@ class DuelingQNetwork(nn.Module):
     """The Dueling Q Network is a neural network that embeds values, 
     features and advantages. From these, we calculate q values during training.  
     """
-   def __init__(self, state_dim=6, action_dim=4):
+    def __init__(self, state_dim=6, action_dim=4):
        super(DuelingQNetwork, self).__init__()
 
        self.feature = nn.Sequential(
